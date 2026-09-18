@@ -3,7 +3,7 @@ import os
 
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
 from app.models import (
     BatteryInput,
@@ -102,15 +102,20 @@ def get_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-def get_model_name() -> str:
+def get_model_names() -> tuple[str, str]:
     load_dotenv()
 
-    model = os.getenv(
+    primary = os.getenv(
         "GEMINI_MODEL",
         "gemini-3.6-flash",
     )
 
-    return model
+    fallback = os.getenv(
+        "GEMINI_FALLBACK_MODEL",
+        "gemini-3.5-flash-lite",
+    )
+
+    return primary, fallback
 
 
 def interpret_operator_notes(
@@ -120,12 +125,13 @@ def interpret_operator_notes(
     """
     Interpret operator notes using Gemini.
 
-    This function only understands the language.
+    This function only interprets the language.
     It does NOT perform energy optimization.
     """
 
     client = get_client()
-    model = get_model_name()
+
+    primary_model, fallback_model = get_model_names()
 
     input_data = {
         "operator_notes": operator_notes,
@@ -142,18 +148,55 @@ def interpret_operator_notes(
         },
     }
 
-    response = client.models.generate_content(
-        model=model,
-        contents=json.dumps(input_data),
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0,
-            response_mime_type="application/json",
-            response_json_schema=(
-                LLMInterpretationResponse.model_json_schema()
-            ),
-        ),
-    )
+    response = None
+    last_error = None
+
+    models_to_try = [
+        primary_model,
+        fallback_model,
+    ]
+
+    for model in models_to_try:
+        try:
+            print(f"Trying Gemini model: {model}")
+
+            response = client.models.generate_content(
+                model=model,
+                contents=json.dumps(input_data),
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0,
+                    response_mime_type="application/json",
+                    response_json_schema=(
+                        LLMInterpretationResponse.model_json_schema()
+                    ),
+                ),
+            )
+
+            # Success — stop trying models.
+            break
+
+        except errors.ServerError as exc:
+            last_error = exc
+
+            status_code = getattr(
+                exc,
+                "code",
+                getattr(exc, "status_code", None),
+            )
+
+            # Only fallback for temporary server-side problems.
+            if status_code not in (500, 502, 503, 504):
+                raise
+
+            print(
+                f"{model} is temporarily unavailable."
+            )
+
+    if response is None:
+        raise RuntimeError(
+            "All configured Gemini models are temporarily unavailable."
+        ) from last_error
 
     if not response.text:
         raise RuntimeError(
