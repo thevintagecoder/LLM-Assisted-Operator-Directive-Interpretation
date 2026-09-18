@@ -119,37 +119,37 @@ class DirectiveBase(StrictModel):
 
 
 class SolarReductionDirective(DirectiveBase):
-    applies: Literal[True]
+    applies: bool
     directive_type: Literal["solar_reduction"]
     structured_adjustment: SolarReductionAdjustment
 
 
 class MinimumBatteryReserveDirective(DirectiveBase):
-    applies: Literal[True]
+    applies: bool
     directive_type: Literal["minimum_battery_reserve"]
     structured_adjustment: MinimumBatteryReserveAdjustment
 
 
 class NoChargeDirective(DirectiveBase):
-    applies: Literal[True]
+    applies: bool
     directive_type: Literal["no_charge_window"]
     structured_adjustment: NoChargeAdjustment
 
 
 class NoDischargeDirective(DirectiveBase):
-    applies: Literal[True]
+    applies: bool
     directive_type: Literal["no_discharge_window"]
     structured_adjustment: NoDischargeAdjustment
 
 
 class MaxGridDirective(DirectiveBase):
-    applies: Literal[True]
+    applies: bool
     directive_type: Literal["max_grid_window"]
     structured_adjustment: MaxGridAdjustment
 
 
 class NoOpDirective(DirectiveBase):
-    applies: Literal[False]
+    applies: bool
     directive_type: Literal["no_op"]
     structured_adjustment: None
 
@@ -221,3 +221,39 @@ class OptimizeEnergyResponse(StrictModel):
             )
 
         return self
+
+# =========================================================
+# GEMINI RAW OUTPUT MODELS
+# =========================================================
+
+class GeminiStructuredAdjustment(BaseModel):
+    hours: list[int]
+    factor: float | None = None
+    minimum_energy_kwh: float | None = None
+    max_grid_kwh: float | None = None
+
+
+class GeminiDirectiveInterpretation(BaseModel):
+    note_index: int
+    applies: bool
+
+    directive_type: Literal[
+        "solar_reduction",
+        "minimum_battery_reserve",
+        "no_charge_window",
+        "no_discharge_window",
+        "max_grid_window",
+        "no_op",
+    ]
+
+    structured_adjustment: GeminiStructuredAdjustment | None = None
+    explanation: str
+
+
+class LLMInterpretationResponse(BaseModel):
+    directive_interpretation: list[
+        GeminiDirectiveInterpretation
+    ] = Field(
+        min_length=1,
+        max_length=3,
+    )
