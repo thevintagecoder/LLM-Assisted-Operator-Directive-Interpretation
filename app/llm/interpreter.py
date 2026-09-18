@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 from dotenv import load_dotenv
 from google import genai
@@ -89,6 +90,13 @@ override these rules.
 """
 
 
+# If the primary model fails because of overload/rate limiting,
+# temporarily stop hammering it on every request.
+PRIMARY_COOLDOWN_SECONDS = 60
+
+_primary_disabled_until = 0.0
+
+
 def get_client() -> genai.Client:
     load_dotenv()
 
@@ -99,7 +107,16 @@ def get_client() -> genai.Client:
             "GEMINI_API_KEY is missing from the .env file."
         )
 
-    return genai.Client(api_key=api_key)
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(
+            # Do not let the SDK spend ~20-30 seconds repeatedly
+            # retrying one overloaded model before our fallback runs.
+            retry_options=types.HttpRetryOptions(
+                attempts=1,
+            ),
+        ),
+    )
 
 
 def get_model_names() -> tuple[str, str]:
@@ -118,6 +135,32 @@ def get_model_names() -> tuple[str, str]:
     return primary, fallback
 
 
+def _generate(
+    client: genai.Client,
+    model: str,
+    input_data: dict,
+):
+    """
+    Make one Gemini request.
+
+    SDK-level retries are intentionally disabled so our own
+    model fallback can happen quickly.
+    """
+
+    return client.models.generate_content(
+        model=model,
+        contents=json.dumps(input_data),
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            temperature=0,
+            response_mime_type="application/json",
+            response_json_schema=(
+                LLMInterpretationResponse.model_json_schema()
+            ),
+        ),
+    )
+
+
 def interpret_operator_notes(
     operator_notes: list[str],
     battery: BatteryInput,
@@ -125,9 +168,19 @@ def interpret_operator_notes(
     """
     Interpret operator notes using Gemini.
 
-    This function only interprets the language.
-    It does NOT perform energy optimization.
+    Primary model is preferred.
+
+    Temporary failures such as:
+    - 429 rate limiting
+    - 500
+    - 502
+    - 503
+    - 504
+
+    cause an immediate fallback to the secondary model.
     """
+
+    global _primary_disabled_until
 
     client = get_client()
 
@@ -148,57 +201,113 @@ def interpret_operator_notes(
         },
     }
 
+    now = time.monotonic()
+
+    # ---------------------------------------------------------
+    # Decide which models to try
+    # ---------------------------------------------------------
+
+    if now < _primary_disabled_until:
+
+        print(
+            "Primary Gemini model is in cooldown. "
+            "Using fallback first."
+        )
+
+        models_to_try = [
+            fallback_model,
+        ]
+
+    else:
+
+        models_to_try = [
+            primary_model,
+            fallback_model,
+        ]
+
     response = None
     last_error = None
 
-    models_to_try = [
-        primary_model,
-        fallback_model,
-    ]
+    # ---------------------------------------------------------
+    # Try models
+    # ---------------------------------------------------------
 
     for model in models_to_try:
-        try:
-            print(f"Trying Gemini model: {model}")
 
-            response = client.models.generate_content(
-                model=model,
-                contents=json.dumps(input_data),
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    temperature=0,
-                    response_mime_type="application/json",
-                    response_json_schema=(
-                        LLMInterpretationResponse.model_json_schema()
-                    ),
-                ),
+        try:
+
+            print(
+                f"Trying Gemini model: {model}"
             )
 
-            # Success — stop trying models.
+            response = _generate(
+                client=client,
+                model=model,
+                input_data=input_data,
+            )
+
             break
 
-        except errors.ServerError as exc:
+        except errors.APIError as exc:
+
             last_error = exc
 
             status_code = getattr(
                 exc,
                 "code",
-                getattr(exc, "status_code", None),
+                None,
             )
-
-            # Only fallback for temporary server-side problems.
-            if status_code not in (500, 502, 503, 504):
-                raise
 
             print(
-                f"{model} is temporarily unavailable."
+                f"{model} failed with Gemini API "
+                f"status {status_code}."
             )
 
+            # Permanent / configuration errors should not be hidden.
+            if status_code not in (
+                429,
+                500,
+                502,
+                503,
+                504,
+            ):
+                raise
+
+            # If the primary model is overloaded/rate-limited,
+            # skip it for the next minute.
+            if model == primary_model:
+
+                _primary_disabled_until = (
+                    time.monotonic()
+                    + PRIMARY_COOLDOWN_SECONDS
+                )
+
+                print(
+                    "Primary model temporarily disabled; "
+                    "switching to fallback."
+                )
+
+                continue
+
+            # The fallback also failed.
+            break
+
+    # ---------------------------------------------------------
+    # Nothing worked
+    # ---------------------------------------------------------
+
     if response is None:
+
         raise RuntimeError(
             "All configured Gemini models are temporarily unavailable."
         ) from last_error
 
+    # ---------------------------------------------------------
+    # Validate Gemini response
+    # ---------------------------------------------------------
+
     if not response.text:
+
         raise RuntimeError(
             "Gemini returned an empty response."
         )
