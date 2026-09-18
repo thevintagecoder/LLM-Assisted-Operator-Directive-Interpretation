@@ -99,7 +99,16 @@ def get_client() -> genai.Client:
             "GEMINI_API_KEY is missing from the .env file."
         )
 
-    return genai.Client(api_key=api_key)
+    # Use a short HTTP timeout so a bad API key or network issue
+    # fails fast instead of hanging the request.
+    timeout_seconds = 30
+
+    return genai.Client(
+        api_key=api_key,
+        http_options={
+            "timeout": timeout_seconds * 1000,
+        },
+    )
 
 
 def get_model_names() -> tuple[str, str]:
@@ -170,6 +179,7 @@ def interpret_operator_notes(
                     response_json_schema=(
                         LLMInterpretationResponse.model_json_schema()
                     ),
+                    automatic_function_calling=None,
                 ),
             )
 
