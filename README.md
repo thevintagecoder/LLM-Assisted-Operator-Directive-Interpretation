@@ -6,6 +6,14 @@ The system interprets natural-language operator directives using an LLM, validat
 
 ---
 
+## Demo Video
+
+**YouTube Demo**
+
+https://www.youtube.com/watch?v=EYygRSGHIjs
+
+---
+
 ## Live Deployment
 
 ### API Base URL
@@ -96,7 +104,7 @@ Temporarily reduces usable solar generation.
 Example:
 
 ```text
-"Solar output will be reduced by 80% from 1 PM until 3 PM."
+Solar output will be reduced by 80% from 1 PM until 3 PM.
 ```
 
 Structured interpretation:
@@ -119,7 +127,7 @@ Requires the battery to maintain a minimum energy level during specified hours.
 Example:
 
 ```text
-"Keep at least 50% of battery capacity in reserve from 6 PM until 9 PM."
+Keep at least 50% of battery capacity in reserve from 6 PM until 9 PM.
 ```
 
 For a 200 kWh battery:
@@ -140,7 +148,7 @@ Prevents battery charging during specified hours.
 Example:
 
 ```text
-"Do not charge the battery between 2 PM and 4 PM."
+Do not charge the battery between 2 PM and 4 PM.
 ```
 
 Structured interpretation:
@@ -160,7 +168,7 @@ Prevents battery discharge during specified hours.
 Example:
 
 ```text
-"Do not discharge the battery from 6 PM until 8 PM."
+Do not discharge the battery from 6 PM until 8 PM.
 ```
 
 Structured interpretation:
@@ -180,7 +188,7 @@ Limits grid electricity usage during specified hours.
 Example:
 
 ```text
-"Grid import must not exceed 155 kWh from 6 PM until 9 PM."
+Grid import must not exceed 155 kWh from 6 PM until 9 PM.
 ```
 
 Structured interpretation:
@@ -201,7 +209,7 @@ Used when an operator note does not affect the current energy schedule.
 Example:
 
 ```text
-"The sports office moved next month's registration deadline."
+The sports office moved next month's registration deadline.
 ```
 
 Structured interpretation:
@@ -267,8 +275,6 @@ subject to all energy and operator constraints.
 
 ## Energy Constraints
 
-The optimizer enforces the following rules.
-
 ### Hourly Energy Balance
 
 ```text
@@ -292,7 +298,7 @@ The battery must respect:
 - no-charge windows
 - no-discharge windows
 
-The battery must also finish hour 23 at the same energy level at which it started the day.
+The battery must finish hour 23 at the same energy level at which it started the day.
 
 ### Solar Constraints
 
@@ -322,9 +328,7 @@ The optimizer uses a single signed battery-flow variable:
 
 ```text
 positive battery flow → charging
-
 negative battery flow → discharging
-
 zero battery flow     → idle
 ```
 
@@ -353,7 +357,7 @@ Before any directive reaches the optimizer, GridWise deterministically checks:
 - non-negative grid cap
 - correct `no_op` structure
 
-The guardrail also normalizes the generic Gemini output into the exact directive structure required by the API.
+The guardrail also normalizes Gemini output into the exact directive structure required by the API.
 
 ---
 
@@ -389,13 +393,13 @@ The primary model is temporarily placed into cooldown after transient provider f
 
 ## Final Schedule Validation
 
-The optimizer output is not returned immediately.
+The optimizer output is independently validated before it is returned.
 
-A separate deterministic validator independently replays all 24 hours and verifies:
+The validator checks:
 
-- 24 hourly entries exist
+- exactly 24 hourly entries
 - hours are exactly `0` through `23`
-- energy balance
+- hourly energy balance
 - solar limits
 - charge limits
 - discharge limits
@@ -449,62 +453,14 @@ The request contains:
 - 24 hourly demand, solar and tariff entries
 - battery configuration
 
-Example structure:
+The response contains:
 
-```json
-{
-  "scenario_id": "EXAMPLE-01",
-  "operator_notes": ["Do not charge the battery between 2 PM and 4 PM."],
-  "hours": [
-    {
-      "hour": 0,
-      "demand_kwh": 90,
-      "solar_kwh": 0,
-      "tariff_bdt_per_kwh": 6
-    }
-  ],
-  "battery": {
-    "capacity_kwh": 220,
-    "initial_energy_kwh": 110,
-    "minimum_energy_kwh": 40,
-    "max_charge_kwh_per_hour": 50,
-    "max_discharge_kwh_per_hour": 50
-  }
-}
-```
-
-The actual request must contain exactly 24 hourly entries.
-
----
-
-## Response
-
-The endpoint returns:
-
-```json
-{
-  "scenario_id": "EXAMPLE-01",
-  "directive_interpretation": [],
-  "hourly_plan": [],
-  "total_grid_kwh": 0,
-  "total_cost_bdt": 0,
-  "peak_grid_kwh": 0,
-  "plan_summary": "..."
-}
-```
-
-The `hourly_plan` contains exactly 24 entries.
-
-Each entry contains:
-
-```text
-hour
-grid_kwh
-solar_used_kwh
-battery_action
-battery_kwh
-battery_energy_after_kwh
-```
+- interpreted directives
+- optimized 24-hour plan
+- total grid usage
+- total electricity cost
+- peak grid usage
+- plan summary
 
 ---
 
@@ -573,8 +529,6 @@ API response
 
 ## Optimizer Test
 
-Run:
-
 ```bash
 python -m scripts.test_optimizer
 ```
@@ -590,8 +544,6 @@ Failed: 0
 
 ## Final Validator Test
 
-Run:
-
 ```bash
 python -m scripts.test_validator
 ```
@@ -603,21 +555,11 @@ Passed: 10
 Failed: 0
 ```
 
-The validator test also deliberately corrupts a valid schedule.
-
-Expected result:
-
-```text
-PASS: Validator rejected corrupted schedule.
-```
-
-This verifies that the final validator does not blindly trust optimizer output.
+The validator test also deliberately corrupts a valid schedule and verifies that it is rejected.
 
 ---
 
-## Local End-to-End API Test
-
-Run:
+## Full End-to-End API Test
 
 ```bash
 python -m scripts.test_all_api_cases
@@ -645,13 +587,9 @@ operator note
 
 ## Production API Test
 
-Run:
-
 ```bash
 python -m scripts.test_render_api
 ```
-
-This sends the 10 public cases to the actual deployed Render endpoint.
 
 Production result:
 
@@ -671,25 +609,15 @@ Slowest request: 2.03s
 
 ```bash
 git clone https://github.com/thevintagecoder/LLM-Assisted-Operator-Directive-Interpretation.git
-
 cd LLM-Assisted-Operator-Directive-Interpretation
 ```
-
----
 
 ## 2. Create a Virtual Environment
 
 ```bash
 python3.11 -m venv .venv
-```
-
-Activate it on macOS/Linux:
-
-```bash
 source .venv/bin/activate
 ```
-
----
 
 ## 3. Install Dependencies
 
@@ -697,11 +625,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
----
-
 ## 4. Configure Environment Variables
 
-Create a `.env` file in the repository root:
+Create a `.env` file:
 
 ```env
 GEMINI_API_KEY=your_api_key_here
@@ -711,20 +637,10 @@ GEMINI_FALLBACK_MODEL=gemini-3.5-flash-lite
 
 Never commit the `.env` file.
 
-An `.env.example` file is provided for reference.
-
----
-
 ## 5. Start the API
 
 ```bash
 python -m uvicorn app.main:app --reload --reload-dir app
-```
-
-The local API will run at:
-
-```text
-http://127.0.0.1:8000
 ```
 
 Swagger:
@@ -733,25 +649,17 @@ Swagger:
 http://127.0.0.1:8000/docs
 ```
 
-Health check:
-
-```text
-http://127.0.0.1:8000/health
-```
-
 ---
 
 # Docker
 
-## Build the Image
+## Build
 
 ```bash
 docker build -t gridwise-llm .
 ```
 
----
-
-## Run the Container
+## Run
 
 ```bash
 docker run \
@@ -761,26 +669,10 @@ docker run \
   gridwise-llm
 ```
 
----
-
-## Test the Container
+## Test
 
 ```bash
 curl http://127.0.0.1:8000/health
-```
-
-Expected:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-Swagger should then be available at:
-
-```text
-http://127.0.0.1:8000/docs
 ```
 
 ---
@@ -790,28 +682,22 @@ http://127.0.0.1:8000/docs
 ```text
 gridwise-llm/
 ├── app/
-│   ├── __init__.py
 │   ├── main.py
 │   ├── models.py
 │   │
 │   ├── llm/
-│   │   ├── __init__.py
 │   │   └── interpreter.py
 │   │
 │   ├── guardrails/
-│   │   ├── __init__.py
 │   │   └── directives.py
 │   │
 │   ├── optimizer/
-│   │   ├── __init__.py
 │   │   └── energy_optimizer.py
 │   │
 │   └── validators/
-│       ├── __init__.py
 │       └── schedule_validator.py
 │
 ├── scripts/
-│   ├── __init__.py
 │   ├── test_interpreter.py
 │   ├── test_guardrails.py
 │   ├── test_optimizer.py
@@ -858,70 +744,27 @@ gridwise-llm/
 - Docker
 - Render
 
-### Monitoring
-
-- Health endpoint
-- External HTTP uptime monitoring
-
 ---
 
 # Security
 
-GridWise follows several defensive practices.
-
-### API Keys
-
-Secrets are loaded using environment variables.
-
-The real Gemini API key is never stored in the repository.
-
-### Prompt Injection Protection
-
-Operator notes are treated as untrusted data.
-
-The system instruction explicitly prevents operator-note content from overriding the directive interpretation rules.
-
-### LLM Output Validation
-
-LLM-generated structured data must pass deterministic guardrails before reaching the optimizer.
-
-### Final Plan Validation
-
-The optimizer output is independently verified before being returned by the API.
-
----
-
-# Reliability Strategy
-
-GridWise uses multiple layers of reliability:
-
-```text
-Pydantic request validation
-        ↓
-LLM interpretation
-        ↓
-LLM provider fallback
-        ↓
-directive guardrails
-        ↓
-mathematical optimizer
-        ↓
-independent schedule validator
-        ↓
-FastAPI response validation
-```
-
-This separation ensures that no single probabilistic LLM output is trusted without deterministic checks.
+- Secrets are stored using environment variables.
+- The Gemini API key is not committed to the repository.
+- Operator notes are treated as untrusted input.
+- LLM output must pass deterministic guardrails.
+- Final schedules are independently validated before being returned.
 
 ---
 
 # Repository
 
-GitHub:
-
-```text
 https://github.com/thevintagecoder/LLM-Assisted-Operator-Directive-Interpretation
-```
+
+---
+
+# Demo Video
+
+https://www.youtube.com/watch?v=EYygRSGHIjs
 
 ---
 
