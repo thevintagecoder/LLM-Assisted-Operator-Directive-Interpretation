@@ -107,7 +107,7 @@ def get_model_name() -> str:
 
     model = os.getenv(
         "GEMINI_MODEL",
-        "gemini-2.5-flash",
+        "gemini-3.6-flash",
     )
 
     return model
