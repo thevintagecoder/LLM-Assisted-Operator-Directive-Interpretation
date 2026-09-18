@@ -762,12 +762,6 @@ https://github.com/thevintagecoder/LLM-Assisted-Operator-Directive-Interpretatio
 
 ---
 
-# Demo Video
-
-https://www.youtube.com/watch?v=EYygRSGHIjs
-
----
-
 # Author
 
 Built for the **BUP CSE Fest 2026 Smart Campus Energy Optimization Challenge**.
